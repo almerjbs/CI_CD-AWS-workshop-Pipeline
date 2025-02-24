@@ -3,6 +3,9 @@ from aws_cdk import (
     Stack,
     CfnOutput,
     aws_codeconnections as codeconnections,
+    aws_codepipeline as codepipeline,
+    aws_codebuild as codebuild,
+    aws_codepipeline_actions as codepipeline_actions,    
 )
 
 class PipelineCdkStack(Stack):
@@ -16,6 +19,53 @@ class PipelineCdkStack(Stack):
                 provider_type="GitHub",
         )
 
+        pipeline = codepipeline.Pipeline(
+            self, 'CICD_Pipeline',
+            cross_account_keys = False,
+            pipeline_type=codepipeline.PipelineType.V2,
+            execution_mode=codepipeline.ExecutionMode.QUEUED
+        )
+
+        code_quality_build = codebuild.PipelineProject(
+            self, 'CodeBuild',
+            build_spec = codebuild.BuildSpec.from_source_filename('./buildspec_test.yml'),
+            environment = codebuild.BuildEnvironment(
+                build_image = codebuild.LinuxBuildImage.STANDARD_5_0,
+                privileged = True,
+                compute_type = codebuild.ComputeType.LARGE,
+            ),
+        )
+
+        source_output = codepipeline.Artifact()
+        unit_test_output = codepipeline.Artifact()
+
+        source_action = codepipeline_actions.CodeStarConnectionsSourceAction(
+          action_name = 'GitHub',
+          owner = "almerjbs",
+          repo = "CI_CD-AWS-workshop-Pipeline",
+          output = source_output,
+          branch = "main",
+          trigger_on_push = True,
+          connection_arn = "arn:aws:codeconnections:us-east-2:531722177852:connection/4b5e1a33-058e-4b5a-b6b7-f2b4df5884ad"
+        )
+
+        pipeline.add_stage(
+          stage_name = 'Source',
+          actions = [source_action]
+        )
+
+        build_action = codepipeline_actions.CodeBuildAction(
+            action_name = 'Unit-Test',
+            project = code_quality_build,
+            input = source_output,  # The build action must use the CodeStarConnectionsSourceAction output as input.
+            outputs = [unit_test_output]
+        )
+
+        pipeline.add_stage(
+            stage_name = 'Code-Quality-Testing',
+            actions = [build_action]
+        )       
+
         CfnOutput(
             self, 'SourceConnectionArn',
             value = SourceConnection.attr_connection_arn
@@ -25,3 +75,4 @@ class PipelineCdkStack(Stack):
             self, 'SourceConnectionStatus',
             value = SourceConnection.attr_connection_status
         )
+
